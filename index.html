@@ -1,0 +1,43 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Whiteboard</title>
+    <style>
+      html,head,body { padding:0; margin:0; }
+      .card-textarea {
+        box-sizing: border-box;
+        border: none;
+        border-bottom: 1px solid black;
+        font-family: monospace;
+        font-size: 12px;
+        resize: none;
+        padding: 0 4px;
+        line-height: 1.02;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="index.js"></script>
+    <script type="text/javascript">(function(){
+      var app = Elm.Whiteboard.fullscreen();
+
+      var scrollOffset = {x: 0, y: 0}
+      var last = {kind: "", x: -1, y: -1}
+
+      ;["down", "up", "move"].forEach(function handleMouseEvent (kind) {
+        window.addEventListener("mouse" + kind, function (e) {
+          var msg = {
+            kind: kind,
+            x: Math.round(e.clientX + window.scrollX),
+            y: Math.round(e.clientY + window.scrollY),
+          }
+          if (last.x !== msg.x || last.y !== msg.y || last.kind !== msg.kind) {
+            app.ports.rawmouse.send(msg)
+          }
+        })
+      })
+    })()</script>
+  </body>
+</html>
