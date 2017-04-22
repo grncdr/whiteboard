@@ -9,7 +9,7 @@ import Time
 import Html exposing (Html)
 import Svg exposing (svg)
 import Svg.Attributes exposing (..)
-import Whiteboard.Persist as Persist
+--import Whiteboard.Persist as Persist
 import Whiteboard.Board as Board
 import Whiteboard.Geometry exposing (gridSize)
 import Debug
@@ -39,7 +39,7 @@ type Msg
 init : ( Model, Cmd Msg )
 init =
     ( { board = Board.init 256 128 }
-    , Task.perform LoadError LoadSuccess Persist.loadBoard
+    , Task.perform LoadSuccess (Task.succeed (Board.init 256 128))
     )
 
 
@@ -56,7 +56,7 @@ view { board } =
             String.join " " [ "0", "0", w, h ]
 
         boardView =
-            Html.App.map Board (Board.view board)
+            Html.map Board (Board.view board)
     in
         svg
             [ width w
@@ -71,21 +71,16 @@ update msg model =
     case msg of
         Board msg ->
             let
-                board =
-                    Board.update msg model.board
-
-                saveTask =
-                    Persist.record model.board board
+                board = Board.update msg model.board
             in
                 ( { model | board = board }
-                , Task.perform SaveError SaveSuccess saveTask
+                , Cmd.none
                 )
 
         LoadSuccess board ->
             ( { model | board = board }
             , Time.now
                 |> Task.perform
-                    (\_ -> Debug.crash "failed to get current time")
                     (round >> Random.initialSeed >> Board.SetSeed >> Board)
             )
 

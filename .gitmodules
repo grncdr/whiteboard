@@ -1,6 +1,0 @@
-[submodule "vendor/elm-window-scroll"]
-	path = vendor/elm-window-scroll
-	url = https://github.com/grncdr/elm-window-scroll
-[submodule "vendor/localstorage"]
-	path = vendor/localstorage
-	url = git@github.com:grncdr/localstorage

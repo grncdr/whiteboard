@@ -20,7 +20,6 @@ import Whiteboard.Svg exposing (..)
 import Whiteboard.Card as Card
 import Whiteboard.Mouse as Mouse
 import VirtualDom as Vdom
-import Window.Scroll
 
 
 type Direction

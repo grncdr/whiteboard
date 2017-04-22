@@ -4,23 +4,20 @@ import Dict exposing (Dict)
 import String
 import Task
 import Json.Encode as E
-import Json.Decode as D exposing ((:=))
+import Json.Decode as D exposing (field)
 import Json.Helpers
-import LocalStorage
 import Whiteboard.Geometry exposing (Rect)
 import Whiteboard.Board as Board
 import Whiteboard.Card as Card
 
 
-loadBoard =
+loadBoard_ =
     getStoredChanges
         |> Task.map (List.foldl Board.update (Board.init 256 128))
 
 
-loadBoard_ =
-    LocalStorage.get "Board"
-        |> Task.mapError storageErrorToString
-        |> (flip Task.andThen) (maybeDecodeBoard >> Task.fromResult)
+loadBoard =
+    Task.succeed (maybeDecodeBoard Nothing)
 
 
 record : Board.Model -> Board.Model -> Task.Task String ()
@@ -111,13 +108,13 @@ decodeBoardMsg =
     Json.Helpers.decodeSumTwoElemArray "Board.Msg"
         (Dict.fromList
             [ ( "AlterCard"
-              , D.object2 Board.AlterCard ("id" := D.string) ("msg" := decodeCardMsg)
+              , D.map2 Board.AlterCard (field "id" D.string) ("msg" := decodeCardMsg)
               )
             , ( "AddCard"
-              , D.object2 Board.AddCard ("id" := D.string) ("card" := decodeCard)
+              , D.map2 Board.AddCard (field "id" D.string) ("card" := decodeCard)
               )
             , ( "RemoveCard"
-              , D.object1 Board.RemoveCard ("id" := D.string)
+              , D.map Board.RemoveCard (field "id" D.string)
               )
             ]
         )
@@ -183,11 +180,11 @@ encodeRect { x, y, w, h } =
 
 decodeRect : D.Decoder Rect
 decodeRect =
-    D.object4 Rect
-        ("x" := D.float)
-        ("y" := D.float)
-        ("w" := D.float)
-        ("h" := D.float)
+    D.map4 Rect
+        (field "x" D.float)
+        (field "y" D.float)
+        (field "w" D.float)
+        (field "h" D.float)
 
 
 record_ old new =
@@ -346,10 +343,10 @@ decodeBoard =
             Board.init cols rows
                 |> \m -> { m | cards = cards }
     in
-        D.object3 init
-            ("cols" := D.int)
-            ("rows" := D.int)
-            ("cards" := D.list decodeCard_ |> D.map Dict.fromList)
+        D.map3 init
+            (field "cols" D.int)
+            (field "rows" D.int)
+            (field "cards" (D.list decodeCard_ |> D.map Dict.fromList))
 
 
 decodeCard : D.Decoder Card.Model
@@ -369,13 +366,13 @@ decodeCard =
             , deleted = False
             }
     in
-        D.object6 init
-            ("x" := D.float)
-            ("y" := D.float)
-            ("w" := D.float)
-            ("h" := D.float)
-            ("color" := D.string)
-            ("textContent" := D.string)
+        D.map6 init
+            (field "x" D.float)
+            (field "y" D.float)
+            (field "w" D.float)
+            (field "h" D.float)
+            (field "color" D.string)
+            (field "textContent" D.string)
 
 
 decodeCard_ : D.Decoder ( Board.Id, Card.Model )
@@ -397,23 +394,12 @@ decodeCard_ =
               }
             )
     in
-        D.object7 init
-            ("id" := D.oneOf [ D.string, (D.map toString D.int) ])
-            ("x" := D.float)
-            ("y" := D.float)
-            ("w" := D.float)
-            ("h" := D.float)
-            ("color" := D.string)
-            ("textContent" := D.string)
+        D.map7 init
+            (field "id" (D.oneOf [ D.string, (D.map toString D.int) ]))
+            (field "x" D.float)
+            (field "y" D.float)
+            (field "w" D.float)
+            (field "h" D.float)
+            ("color" D.string)
+            (field "textContent" D.string)
 
-
-storageErrorToString e =
-    case e of
-        LocalStorage.NoStorage ->
-            "No local storage"
-
-        LocalStorage.UnexpectedPayload s ->
-            "Unexpected payload: " ++ s
-
-        LocalStorage.Overflow ->
-            "Storage space exceeded"
