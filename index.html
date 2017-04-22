@@ -16,6 +16,22 @@
         line-height: 1.02;
         overflow: hidden;
       }
+      svg text {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+        cursor: default;
+      }
+      svg text::selection {
+        background: none;
+      }
+      svg .clickable, svg .clickable * {
+        cursor: pointer;
+      }
+      svg .resizer {
+        cursor: se-resize;
+      }
     </style>
   </head>
   <body>
