@@ -1,5 +1,7 @@
 module Whiteboard.Backend exposing (..)
 
+import Http
+import GraphCool
 import Task exposing (Task)
 import ISO8601
 import Json.Decode as Decode
@@ -10,16 +12,24 @@ import GraphQL.Client.Http as GraphQLClient
 
 type alias ClientError = GraphQLClient.Error
 
-endpoint =
-        "https://api.graph.cool/simple/v1/cj1t5q0el8t3s0109xy3shmyh"
+mutate : Maybe Authorization -> Document Mutation res params -> params -> Task ClientError res
+mutate auth doc params =
+  request params doc |> GraphQLClient.customSendMutation (opts auth)
 
-mutate : Document Mutation res params -> params -> Task ClientError res
-mutate doc params =
-  request params doc |> GraphQLClient.sendMutation endpoint
+query : Maybe Authorization -> Document Query res params -> params -> Task ClientError res
+query auth doc params =
+  request params doc |> GraphQLClient.customSendQuery (opts auth)
 
-query : Document Query res params -> params -> Task ClientError res
-query doc params =
-  request params doc |> GraphQLClient.sendQuery endpoint
+opts : Maybe Authorization -> GraphQLClient.RequestOptions
+opts auth =
+    { method = "POST"
+    , url = "https://api.graph.cool/simple/v1/cj1t5q0el8t3s0109xy3shmyh"
+    , timeout = Nothing
+    , withCredentials = False
+    , headers = case auth of
+        Nothing -> []
+        Just a -> [ Http.header "Authorization" ("Bearer " ++ a.token) ]
+    }
 
 type DateTimeType
     = DateTimeType
@@ -35,6 +45,63 @@ datetime =
                     Err errorMessage ->
                         Decode.fail errorMessage)
         |> customScalar DateTimeType
+
+type alias Authorization =
+    { token : String
+    , user : String
+    }
+
+authorization : ValueSpec NonNull ObjectType Authorization vars
+authorization =
+    object Authorization
+        |> with (field "token" [] string)
+        |> with (field "user"  [] (extract (field "id" [] id)))
+
+createUser : Document Mutation String { vars | email : String , password : String }
+createUser =
+    let
+        emailVar =
+            Var.required "email" .email Var.string
+
+        passwordVar =
+            Var.required "password" .password Var.string
+    in
+        mutationDocument <|
+            extract
+                (field "createUser"
+                    [ ( "authProvider",
+                        Arg.object
+                          [ ( "email"
+                            , Arg.object
+                                [ ( "email", Arg.variable emailVar )
+                                , ( "password", Arg.variable passwordVar )
+                                ]
+                            )
+                          ]
+                       )
+                    ]
+                    (extract (field "id" [] string))
+                )
+
+signinUser : Document Mutation Authorization { vars | email : String , password : String }
+signinUser =
+    let
+        emailVar =
+            Var.required "email" .email Var.string
+
+        passwordVar =
+            Var.required "password" .password Var.string
+    in
+        mutationDocument <|
+            extract
+                (field "signinUser"
+                    [ ( "email"
+                      , Arg.object
+                          [ ( "email", Arg.variable emailVar )
+                          , ( "password", Arg.variable passwordVar ) ] )
+                    ]
+                    authorization
+                )
 
 type alias Board =
     { id : String
@@ -86,6 +153,27 @@ card =
         |> with (field "deleted" [] bool)
 
 
+loadBoards : Document Query (List Board) { vars | user : String }
+loadBoards =
+    let
+        userId1 = Var.required "userId1" .user Var.id
+        userId2 = Var.required "userId2" .user Var.id
+        filter = GraphCool.or
+          [ GraphCool.eq "owner" <| GraphCool.eq "id" (Arg.variable userId2)
+          , GraphCool.some "members" <| GraphCool.eq "id" (Arg.variable userId1)
+          ]
+    in
+       queryDocument <|
+         extract (field "allBoards" [ ( "filter", filter ) ] (list board))
+
+createBoard : Document Mutation Board { vars | user : String }
+createBoard =
+  let
+      ownerId = Var.required "ownerId" .user Var.id
+  in
+      mutationDocument <|
+        extract (field "createBoard" [ ( "ownerId", Arg.variable ownerId ) ] board)
+
 loadBoard : Document Query Board { vars | boardID : String }
 loadBoard =
     let
@@ -96,46 +184,50 @@ loadBoard =
     in
         queryDocument queryRoot
 
-createCard : Document Mutation Card { vars
-                                    | boardId : String
-                                    , textContent : String
-                                    , x : Float
-                                    , y : Float
-                                    , w : Float
-                                    , h : Float
-                                    , color : String
-                                    }
-createCard =
+type alias CreateCardParams vars =
+    { vars
+    | boardId : String
+    , textContent : String
+    , x : Float
+    , y : Float
+    , w : Float
+    , h : Float
+    , color : String
+    }
+
+createCard : String -> Document Mutation Card (CreateCardParams v)
+createCard creatorId =
     let
-        boardIDVar =
+        boardId =
             Var.required "boardId" .boardId Var.id
 
-        widthVar =
+        width =
             Var.required "w" .w Var.float
 
-        heightVar =
+        height =
             Var.required "h" .h Var.float
 
-        xVar =
+        x =
             Var.required "x" .x Var.float
 
-        yVar =
+        y =
             Var.required "y" .y Var.float
 
-        colorVar =
+        color =
             Var.required "color" .color Var.string
 
-        contentVar =
+        content =
             Var.required "content" .textContent Var.string
 
         args =
-            [ ( "boardId", Arg.variable boardIDVar )
-            , ( "w", Arg.variable widthVar )
-            , ( "h", Arg.variable heightVar )
-            , ( "x", Arg.variable xVar )
-            , ( "y", Arg.variable yVar )
-            , ( "color", Arg.variable colorVar )
-            , ( "content", Arg.variable contentVar )
+            [ ( "boardId", Arg.variable boardId )
+            , ( "creatorId", Arg.string creatorId )
+            , ( "w", Arg.variable width )
+            , ( "h", Arg.variable height )
+            , ( "x", Arg.variable x )
+            , ( "y", Arg.variable y )
+            , ( "color", Arg.variable color )
+            , ( "content", Arg.variable content )
             ]
     in
         extract (field "createCard" args card) |> mutationDocument

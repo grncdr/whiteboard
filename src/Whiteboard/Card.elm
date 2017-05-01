@@ -37,7 +37,8 @@ type DragKind
 
 
 type alias Model =
-    { boardId : String
+    { auth : Backend.Authorization
+    , boardId : String
     , id : String
     , x : Float
     , y : Float
@@ -53,9 +54,10 @@ type alias Model =
     }
 
 
-fromBackend : String -> Backend.Card -> Model
-fromBackend boardId {id, content, x, y, w, h, color, deleted} =
-  { boardId = boardId
+initFromBackend : Backend.Authorization -> String -> Backend.Card -> Model
+initFromBackend auth boardId {id, content, x, y, w, h, color, deleted} =
+  { auth = auth
+  , boardId = boardId
   , id = id
   , x = x
   , y = y
@@ -70,12 +72,13 @@ fromBackend boardId {id, content, x, y, w, h, color, deleted} =
   , deleted = deleted
   }
 
-initFromDrag boardId p1 p2 =
+initFromDrag auth boardId p1 p2 =
     let
         { x, y, w, h } =
             points2rect p1 p2
     in
-        { boardId = boardId
+        { auth = auth
+        , boardId = boardId
         , id = ""
         , x = x
         , y = y
@@ -250,7 +253,10 @@ update msg model =
 
         ( Mouse (Mouse.Up pt), Just Resize ) ->
           saveCard model { model | drag = Nothing }
-            (if model.id == "" then Backend.createCard else Backend.resizeCard)
+            (if model.id == "" then
+               Backend.createCard model.auth.user
+             else
+               Backend.resizeCard)
 
         ( Commit data, _ ) ->
           ({ model | id = data.id }, Cmd.none)
@@ -265,7 +271,7 @@ update msg model =
 
 saveCard prev next mutationDoc =
   let cmd =
-        Backend.mutate mutationDoc next
+        Backend.mutate (Just prev.auth) mutationDoc next
         |> Task.attempt (\res -> case (res, prev.id) of
           (Ok data, _) -> Commit data
           (Err err, "") -> Destroy

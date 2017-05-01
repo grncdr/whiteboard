@@ -15,6 +15,7 @@ import Svg.Attributes exposing (..)
 
 import Whiteboard.Backend as Backend
 import Whiteboard.Board as Board
+import Whiteboard.Login as Login
 import Whiteboard.Geometry exposing (gridSize)
 import Util exposing (attemptWith)
 import Debug
@@ -30,17 +31,21 @@ main =
 
 
 type alias Model =
-    { board : Maybe Board.Model
+    { auth : Maybe Backend.Authorization
+    , board : Maybe Board.Model
+    , allBoards : List Board.Model
     , loadError : Maybe String
+    , login : Login.Model
     }
 
 
 type Msg
-    = Board Board.Msg
+    = Login Login.Msg
+    | Board Board.Msg
     | SaveError String
     | SaveSuccess ()
     | LoadError Backend.ClientError
-    | LoadSuccess Board.Model
+    | LoadSuccess (List Board.Model)
 
 
 
@@ -53,19 +58,28 @@ boardid =
 
 init : ( Model, Cmd Msg )
 init =
-    ( { board = Nothing, loadError = Nothing }
-    , Backend.query Backend.loadBoard { boardID = boardid }
-        |> Task.map Board.fromBackend
+    ( { login = Login.init
+      , board = Nothing
+      , allBoards = []
+      , loadError = Nothing
+      , auth = Nothing
+      }
+    , Cmd.none )
+
+{-
+    , Backend.query config Backend.loadBoard { boardID = boardid }
+        |> Task.map (Board.initFromBackend
         |> attemptWith LoadSuccess LoadError
     )
+-}
 
 
 view : Model -> Html Msg
-view { board, loadError } =
-  case board of
-    Just b -> viewBoard b
-    Nothing -> Html.p [] [ Html.text (Maybe.withDefault "Loading..." loadError) ]
-
+view { login, auth, board, allBoards, loadError } =
+  case (auth, board) of
+    (Nothing, _) -> Login.view login |> Html.map Login
+    (_, Nothing) -> Html.div [] [ Html.text "loading..." ]
+    (_, Just board) -> viewBoard board
 
 viewBoard : Board.Model -> Html Msg
 viewBoard board =
@@ -79,7 +93,7 @@ viewBoard board =
         vb =
             String.join " " [ "0", "0", w, h ]
 
-        boardView =
+        boardHtml =
             Html.map Board (Board.view board)
     in
         svg
@@ -87,12 +101,28 @@ viewBoard board =
             , height h
             , viewBox vb
             ]
-            [ boardView ]
+            [ boardHtml ]
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        Login msg ->
+            let (login, cmd) = Login.update msg model.login
+                loginCmd = Cmd.map Login cmd
+            in case login.auth of
+                Nothing ->
+                    ( { model | login = login }, loginCmd )
+                Just auth -> 
+                    ( { model | login = login, auth = login.auth }
+                    , Cmd.batch
+                        [ loginCmd -- usually Cmd.none
+                        , Backend.query (Just auth) Backend.loadBoards auth
+                          |> Task.andThen (maybeCreateInitialBoard auth)
+                          |> Task.map (List.map (Board.initFromBackend auth))
+                          |> attemptWith LoadSuccess LoadError
+                        ] )
+                
         Board msg ->
             case (Maybe.map (Board.update msg) model.board) of
                 Nothing ->
@@ -101,8 +131,8 @@ update msg model =
                 Just ( board, cmd ) ->
                     ( { model | board = Just board }, Cmd.map Board cmd )
 
-        LoadSuccess board ->
-            ( { model | board = Just board }
+        LoadSuccess boards ->
+            ( { model | allBoards = boards, board = List.head boards }
             , Time.now
                 |> Task.perform
                     (round >> Random.initialSeed >> Board.SetSeed >> Board)
@@ -120,6 +150,14 @@ update msg model =
                     Debug.log "save error" err
             in
                 ( model, Cmd.none )
+
+
+maybeCreateInitialBoard : Backend.Authorization -> List Backend.Board -> Task.Task Backend.ClientError (List Backend.Board)
+maybeCreateInitialBoard auth boards =
+    if List.length boards > 0 then Task.succeed boards
+    else
+        Backend.mutate (Just auth) Backend.createBoard auth
+        |> Task.map (\board -> [board])
 
 
 subscriptions model =

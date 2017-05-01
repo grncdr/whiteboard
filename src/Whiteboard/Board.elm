@@ -17,7 +17,7 @@ import Whiteboard.Geometry as Geom
         , points2rect
         )
 import Whiteboard.Svg exposing (..)
-import Whiteboard.Backend
+import Whiteboard.Backend as Backend
 import Whiteboard.Card as Card
 import Whiteboard.Mouse as Mouse
 import VirtualDom as Vdom
@@ -42,6 +42,7 @@ type alias Id =
 
 type alias Model =
     { seed : Random.Seed
+    , auth : Backend.Authorization
     , boardId : Id
     , mouse : Maybe Point
     , scrollOffset : Point
@@ -52,13 +53,14 @@ type alias Model =
     }
 
 
-fromBackend : Whiteboard.Backend.Board -> Model
-fromBackend { id, w, h, cards } =
+initFromBackend : Backend.Authorization -> Backend.Board -> Model
+initFromBackend auth { id, w, h, cards } =
     let
         insertCard backendCard =
-            Dict.insert backendCard.id (Card.fromBackend id backendCard)
+            Dict.insert backendCard.id (Card.initFromBackend auth id backendCard)
     in
-        { boardId = id
+        { auth = auth
+        , boardId = id
         , seed = Random.initialSeed 0
         , mouse = Nothing
         , scrollOffset = Point 0 0
@@ -184,7 +186,7 @@ mouseUpdate mouseMsg m =
                 in
                     ( { m
                         | seed = seed
-                        , cards = Dict.insert id (Card.initFromDrag m.boardId p1 p2) m.cards
+                        , cards = Dict.insert "" (Card.initFromDrag m.auth m.boardId p1 p2) m.cards
                         , dragStart = Nothing -- further handling of the drag is done by the card
                       }
                     , Cmd.none
