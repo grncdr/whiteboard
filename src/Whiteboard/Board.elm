@@ -17,6 +17,7 @@ import Whiteboard.Geometry as Geom
         , points2rect
         )
 import Whiteboard.Svg exposing (..)
+import Whiteboard.Backend
 import Whiteboard.Card as Card
 import Whiteboard.Mouse as Mouse
 import VirtualDom as Vdom
@@ -41,6 +42,7 @@ type alias Id =
 
 type alias Model =
     { seed : Random.Seed
+    , boardId : Id
     , mouse : Maybe Point
     , scrollOffset : Point
     , dragStart : Maybe Point
@@ -50,16 +52,21 @@ type alias Model =
     }
 
 
-init : Int -> Int -> Model
-init cols rows =
-    { seed = Random.initialSeed 0
-    , mouse = Nothing
-    , scrollOffset = Point 0 0
-    , dragStart = Nothing
-    , cols = cols
-    , rows = rows
-    , cards = Dict.empty
-    }
+fromBackend : Whiteboard.Backend.Board -> Model
+fromBackend { id, w, h, cards } =
+    let
+        insertCard backendCard =
+            Dict.insert backendCard.id (Card.fromBackend id backendCard)
+    in
+        { boardId = id
+        , seed = Random.initialSeed 0
+        , mouse = Nothing
+        , scrollOffset = Point 0 0
+        , dragStart = Nothing
+        , cols = w
+        , rows = h
+        , cards = List.foldl insertCard Dict.empty cards
+        }
 
 
 view : Model -> Svg Msg
@@ -139,49 +146,61 @@ subscriptions model =
         Sub.batch (mouse :: cardSubs)
 
 
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg m =
     case msg of
         Mouse mouseMsg ->
-            case ( mouseMsg, m.dragStart ) of
-                ( Mouse.Move p1, Just p2 ) ->
-                    if p1 == p2 then
-                        m
-                    else
-                        let
-                            ( id, seed ) =
-                                Random.step cardIdGenerator m.seed
-                        in
-                            { m
-                                | seed = seed
-                                , cards = Dict.insert id (Card.initFromDrag p1 p2) m.cards
-                                , dragStart = Nothing -- further handling of the drag is done by the card
-                            }
-
-                ( Mouse.Down pt, _ ) ->
-                    if pointHasCard pt m.cards then
-                        m
-                    else
-                        { m | dragStart = Just pt }
-
-                ( Mouse.Up pos, _ ) ->
-                    { m | dragStart = Nothing }
-
-                _ ->
-                    m
+            mouseUpdate mouseMsg m
 
         SetSeed seed ->
-            { m | seed = seed }
+            ( { m | seed = seed }, Cmd.none )
 
         -- Used by log replay only, normally cards are added by mouse interaction
         AddCard id card ->
-            { m | cards = Dict.insert id card m.cards }
+            ( { m | cards = Dict.insert id card m.cards }, Cmd.none )
 
         AlterCard id msg ->
-            { m | cards = Dict.update id (Maybe.map (Card.update msg)) m.cards }
+          case (Dict.get id m.cards |> Maybe.map (Card.update msg)) of
+            Nothing ->
+              (m, Cmd.none)
+            Just (newCard, cmd) ->
+              ( { m | cards = Dict.insert id newCard m.cards }, Cmd.map (AlterCard id) cmd)
 
         -- Same as above, used only by log replay
         RemoveCard id ->
-            { m | cards = Dict.update id (Maybe.map (\c -> { c | deleted = True })) m.cards }
+            ( { m | cards = Dict.update id (Maybe.map (\c -> { c | deleted = True })) m.cards }, Cmd.none )
+
+
+mouseUpdate : Mouse.Evt -> Model -> (Model, Cmd Msg)
+mouseUpdate mouseMsg m =
+    case ( mouseMsg, m.dragStart ) of
+        ( Mouse.Move p1, Just p2 ) ->
+            if p1 == p2 then
+                (m, Cmd.none)
+            else
+                let
+                    ( id, seed ) =
+                        Random.step cardIdGenerator m.seed
+                in
+                    ( { m
+                        | seed = seed
+                        , cards = Dict.insert id (Card.initFromDrag m.boardId p1 p2) m.cards
+                        , dragStart = Nothing -- further handling of the drag is done by the card
+                      }
+                    , Cmd.none
+                    )
+
+        ( Mouse.Down pt, _ ) ->
+            if pointHasCard pt m.cards then
+                (m, Cmd.none)
+            else
+                ( { m | dragStart = Just pt }, Cmd.none )
+
+        ( Mouse.Up pos, _ ) ->
+            ( { m | dragStart = Nothing }, Cmd.none )
+
+        _ ->
+            ( m, Cmd.none )
 
 
 pointHasCard pos cards =

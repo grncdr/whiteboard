@@ -1,5 +1,6 @@
 module Whiteboard.Card exposing (..)
 
+import Task
 import String
 import Svg exposing (Svg)
 import Svg.Events exposing (onMouseDown, onMouseUp)
@@ -15,6 +16,7 @@ import Whiteboard.Mouse as Mouse
 import Whiteboard.Cog as Cog
 import Whiteboard.Menu as Menu
 import Whiteboard.ColorSelector as ColorSelector
+import Whiteboard.Backend as Backend
 
 
 type Msg
@@ -25,6 +27,8 @@ type Msg
     | SetRect Rect
     | ToggleSettings Bool
     | Destroy
+    | Commit Backend.Card
+    | Rollback Backend.ClientError Model
 
 
 type DragKind
@@ -33,7 +37,9 @@ type DragKind
 
 
 type alias Model =
-    { x : Float
+    { boardId : String
+    , id : String
+    , x : Float
     , y : Float
     , w : Float
     , h : Float
@@ -47,12 +53,31 @@ type alias Model =
     }
 
 
-initFromDrag p1 p2 =
+fromBackend : String -> Backend.Card -> Model
+fromBackend boardId {id, content, x, y, w, h, color, deleted} =
+  { boardId = boardId
+  , id = id
+  , x = x
+  , y = y
+  , w = w
+  , h = h
+  , color = color
+  , textContent = content
+  , mouse = { x = 0, y = 0 }
+  , drag = Nothing
+  , dragStart = { x = 0, y = 0 }
+  , showSettings = False
+  , deleted = deleted
+  }
+
+initFromDrag boardId p1 p2 =
     let
         { x, y, w, h } =
             points2rect p1 p2
     in
-        { x = x
+        { boardId = boardId
+        , id = ""
+        , x = x
         , y = y
         , w = w
         , h = h
@@ -155,39 +180,37 @@ subscriptions model =
     Mouse.quantized Mouse
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
     case ( msg, model.drag ) of
         ( Destroy, _ ) ->
-            { model | deleted = confirm "Delete this card?", showSettings = False }
+          if confirm "Delete this card?" then
+            saveCard model { model | showSettings = False, deleted = True } Backend.setCardDeleted
+          else
+            ({ model | showSettings = False }, Cmd.none)
 
         ( DragStart Move, _ ) ->
-            { model | drag = Just Move, dragStart = model.mouse }
+            ({ model | drag = Just Move, dragStart = model.mouse }, Cmd.none)
 
         ( DragStart Resize, _ ) ->
-            { model | drag = Just Resize }
+            ({ model | drag = Just Resize }, Cmd.none)
 
         ( ToggleSettings onOff, _ ) ->
-            { model | showSettings = onOff }
+            ({ model | showSettings = onOff }, Cmd.none)
 
         ( SetText s, _ ) ->
             let
-                content =
-                    contentDimensions s
-
-                w_ =
-                    max content.w model.w
-
-                h_ =
-                    max content.h model.h
+                box = contentDimensions s
+                w = max box.w model.w
+                h = max box.h model.h
             in
-                { model | textContent = s, w = w_, h = h_ }
+              saveCard model { model | textContent = s, w = w, h = h } Backend.setCardContent
 
         ( SetColor color, _ ) ->
-            { model | color = color, showSettings = False }
+            saveCard model { model | color = color, showSettings = False } Backend.setCardColor
 
         ( SetRect { x, y, w, h }, _ ) ->
-            { model | x = x, y = y, w = w, h = h }
+            ({ model | x = x, y = y, w = w, h = h }, Cmd.none)
 
         ( Mouse (Mouse.Move pt), Just Resize ) ->
             let
@@ -205,29 +228,49 @@ update msg model =
 
                 h_ =
                     max dragH content.h
+                
             in
-                { model | w = atLeast 2 w_, h = atLeast 2 h_ }
+                ({ model | w = atLeast 2 w_, h = atLeast 2 h_ }, Cmd.none)
 
         ( Mouse (Mouse.Move pt), Just Move ) ->
             let
                 delta =
                     sub pt model.dragStart
             in
-                { model
+                ({ model
                     | x = model.x + delta.x
                     , y = model.y + delta.y
                     , dragStart = add model.dragStart delta
-                }
-
+                }, Cmd.none) 
         ( Mouse (Mouse.Move pt), Nothing ) ->
-            { model | mouse = pt }
+            ({ model | mouse = pt }, Cmd.none)
 
-        ( Mouse (Mouse.Up pt), Just _ ) ->
-            { model | drag = Nothing }
+        ( Mouse (Mouse.Up pt), Just Move ) ->
+          saveCard model { model | drag = Nothing } Backend.moveCard
+
+        ( Mouse (Mouse.Up pt), Just Resize ) ->
+          saveCard model { model | drag = Nothing }
+            (if model.id == "" then Backend.createCard else Backend.resizeCard)
+
+        ( Commit data, _ ) ->
+          ({ model | id = data.id }, Cmd.none)
+
+        ( Rollback err prev, _ ) ->
+          (prev, Cmd.none)
 
         _ ->
-            model
+            (model, Cmd.none)
 
+
+
+saveCard prev next mutationDoc =
+  let cmd =
+        Backend.mutate mutationDoc next
+        |> Task.attempt (\res -> case (res, prev.id) of
+          (Ok data, _) -> Commit data
+          (Err err, "") -> Destroy
+          (Err err, _) -> Rollback err prev)
+  in (next, cmd)
 
 contentDimensions s =
     let

@@ -9,9 +9,14 @@ import Time
 import Html exposing (Html)
 import Svg exposing (svg)
 import Svg.Attributes exposing (..)
+
+
 --import Whiteboard.Persist as Persist
+
+import Whiteboard.Backend as Backend
 import Whiteboard.Board as Board
 import Whiteboard.Geometry exposing (gridSize)
+import Util exposing (attemptWith)
 import Debug
 
 
@@ -25,26 +30,45 @@ main =
 
 
 type alias Model =
-    { board : Board.Model }
+    { board : Maybe Board.Model
+    , loadError : Maybe String
+    }
 
 
 type Msg
     = Board Board.Msg
     | SaveError String
     | SaveSuccess ()
-    | LoadError String
+    | LoadError Backend.ClientError
     | LoadSuccess Board.Model
+
+
+
+-- testing
+
+
+boardid =
+    "cj250lw8a153h0182zhn77uu9"
 
 
 init : ( Model, Cmd Msg )
 init =
-    ( { board = Board.init 256 128 }
-    , Task.perform LoadSuccess (Task.succeed (Board.init 256 128))
+    ( { board = Nothing, loadError = Nothing }
+    , Backend.query Backend.loadBoard { boardID = boardid }
+        |> Task.map Board.fromBackend
+        |> attemptWith LoadSuccess LoadError
     )
 
 
 view : Model -> Html Msg
-view { board } =
+view { board, loadError } =
+  case board of
+    Just b -> viewBoard b
+    Nothing -> Html.p [] [ Html.text (Maybe.withDefault "Loading..." loadError) ]
+
+
+viewBoard : Board.Model -> Html Msg
+viewBoard board =
     let
         w =
             board.cols * gridSize |> toString
@@ -70,26 +94,22 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         Board msg ->
-            let
-                board = Board.update msg model.board
-            in
-                ( { model | board = board }
-                , Cmd.none
-                )
+            case (Maybe.map (Board.update msg) model.board) of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just ( board, cmd ) ->
+                    ( { model | board = Just board }, Cmd.map Board cmd )
 
         LoadSuccess board ->
-            ( { model | board = board }
+            ( { model | board = Just board }
             , Time.now
                 |> Task.perform
                     (round >> Random.initialSeed >> Board.SetSeed >> Board)
             )
 
         LoadError err ->
-            let
-                _ =
-                    Debug.log "load error" err
-            in
-                ( model, Cmd.none )
+            ( { model | loadError = Just (toString err) }, Cmd.none )
 
         SaveSuccess _ ->
             ( model, Cmd.none )
@@ -103,4 +123,8 @@ update msg model =
 
 
 subscriptions model =
-    Sub.batch [ Sub.map Board (Board.subscriptions model.board) ]
+    let
+        boardSubs board =
+            Sub.map Board (Board.subscriptions board)
+    in
+        Maybe.map boardSubs model.board |> Maybe.withDefault Sub.none
