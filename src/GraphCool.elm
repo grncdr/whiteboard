@@ -10,5 +10,5 @@ and predicates =
 eq name value =
   Arg.object [ ( name , value ) ]
 
-some name value = 
-  Arg.object [ ( name ++ "_some" , value ) ]
+some name filter =
+  Arg.object [ ( name ++ "_some" , filter ) ]
